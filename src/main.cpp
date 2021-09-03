@@ -13,17 +13,12 @@
 boolean takeNewPhoto = false;
 const char* ssid = "estacionaqui_pi";
 const char* password = "modular123";
-// const char* ssid = "Avelino-2.4G";
-// const char* password = "avelino1461";
 
 const char* serverName = "http://192.168.0.10:5000/api/v1/resources/imgdata";
 
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
-// Timer set to 10 minutes (600000)
-//unsigned long timerDelay = 600000;
-// Set timer to 5 seconds (5000)
 unsigned long timerDelay = 5000;
 
 WiFiClient wifiClient; // do the WiFi instantiation thing
@@ -140,31 +135,11 @@ String capturePhotoSaveSpiffs() {
 
     Serial.println(encoded);
 
-    // // Photo file name
-    // Serial.printf("Picture file name: %s\n", FILE_PHOTO);
-    // File file = SPIFFS.open(FILE_PHOTO, FILE_WRITE);
-
-    // // Insert the data in the photo file
-    // if (!file) {
-    //   Serial.println("Failed to open file in writing mode");
-    // }
-    // else {
-    //   file.write(pic->buf, pic->len); // payload (image), payload length
-    //   Serial.print("The picture has been saved in ");
-    //   Serial.print(FILE_PHOTO);
-    //   Serial.print(" - Size: ");
-    //   Serial.print(file.size());
-    //   Serial.println(" bytes");
-    // }
-    // // Close the file
-    // file.close();
     esp_camera_fb_return(pic);
 
     if (encoded.length() > 0) {
       ok = 1;
     }
-    // // check if file has been correctly saved in SPIFFS
-    // ok = checkPhoto(SPIFFS);
   } while ( !ok );
 
   return encoded;
