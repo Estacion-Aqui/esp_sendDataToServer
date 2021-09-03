@@ -7,19 +7,24 @@
 
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #define FILE_PHOTO "/photo.jpg"
+#define pressButton 2
 
 #include "camera_pins.h"
 
-boolean takeNewPhoto = false;
-const char* ssid = "estacionaqui_pi";
-const char* password = "modular123";
+// const char* ssid = "estacionaqui_pi";
+// const char* password = "modular123";
+const char* ssid = "Avelino-2.4G";
+const char* password = "avelino1461";
+const char* camId = "sbc-golden-001";
 
-const char* serverName = "http://192.168.0.10:5000/api/v1/resources/imgdata";
+// const char* serverName = "http://192.168.0.10:5000/api/imgdata";
+const char* serverName = "http://192.168.15.160:5000/api/imgdata";
 
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
+unsigned int spotNumber = 0;
 
 WiFiClient wifiClient; // do the WiFi instantiation thing
 
@@ -29,6 +34,7 @@ void setup() {
   Serial.println();
 
   Serial.println("init setup");
+  pinMode(pressButton, INPUT);
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -104,7 +110,6 @@ void setup() {
     Serial.println("SPIFFS mounted successfully");
   }
 
-  takeNewPhoto = true;
 }
 
 bool checkPhoto( fs::FS &fs ) {
@@ -133,8 +138,6 @@ String capturePhotoSaveSpiffs() {
 
     encoded = base64::encode(pic->buf, pic_len);
 
-    Serial.println(encoded);
-
     esp_camera_fb_return(pic);
 
     if (encoded.length() > 0) {
@@ -152,19 +155,27 @@ void loop() {
       WiFiClient client;
       HTTPClient http;
 
-      if (takeNewPhoto) {
-        String img_base64 = capturePhotoSaveSpiffs();
-        takeNewPhoto = false;
+      while(digitalRead(pressButton)==HIGH){
+        delay(100);
 
-        // Your Domain name with URL path or IP address with path
-        http.begin(client, serverName);
+        if(digitalRead(pressButton)==HIGH){
+          String img_base64 = capturePhotoSaveSpiffs();
+          spotNumber = 1;
 
-        http.addHeader("Content-Type", "application/json");
-        String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\"}");
+          // Your Domain name with URL path or IP address with path
+          http.begin(client, serverName);
 
-        int httpResponseCode = http.POST(httpMessage);
+          http.addHeader("Content-Type", "application/json");
+          String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
+          String("\"cam_id\":\"") + String(camId) + String("\",") +
+          String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
 
-        Serial.println(httpResponseCode);
+          Serial.println("sending message to server");
+
+          int httpResponseCode = http.POST(httpMessage);
+
+          Serial.println(httpResponseCode);
+        }
       }
     }
   }
