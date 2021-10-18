@@ -7,7 +7,10 @@
 
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #define FILE_PHOTO "/photo.jpg"
-#define pressButton 2
+#define trigPin 4
+#define echoPin 2
+#define SOUND_SPEED 0.034
+
 
 #include "camera_pins.h"
 
@@ -26,16 +29,12 @@ unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
 unsigned int spotNumber = 0;
 
+long duration = 0;
+float distanceCm = 0.0;
+
 WiFiClient wifiClient; // do the WiFi instantiation thing
 
-void setup() {
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  Serial.println();
-
-  Serial.println("init setup");
-  pinMode(pressButton, INPUT);
-
+void configInitCamera(){
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -58,7 +57,7 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
+    // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
   //                      for larger pre-allocated frame buffer.
   if(psramFound()){
     config.frame_size = FRAMESIZE_UXGA;
@@ -78,14 +77,48 @@ void setup() {
   }
 
   sensor_t * s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
+  s->set_contrast(s, 0);       // -2 to 2
+  s->set_special_effect(s, 0); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
+  s->set_whitebal(s, 1);       // 0 = disable , 1 = enable
+  s->set_awb_gain(s, 1);       // 0 = disable , 1 = enable
+  s->set_wb_mode(s, 0);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
+  s->set_exposure_ctrl(s, 1);  // 0 = disable , 1 = enable
+  s->set_aec2(s, 0);           // 0 = disable , 1 = enable
+  s->set_ae_level(s, 0);       // -2 to 2
+  s->set_aec_value(s, 300);    // 0 to 1200
+  s->set_gain_ctrl(s, 1);      // 0 = disable , 1 = enable
+  s->set_agc_gain(s, 0);       // 0 to 30
+  s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
+  s->set_bpc(s, 0);            // 0 = disable , 1 = enable
+  s->set_wpc(s, 1);            // 0 = disable , 1 = enable
+  s->set_raw_gma(s, 1);        // 0 = disable , 1 = enable
+  s->set_lenc(s, 1);           // 0 = disable , 1 = enable
+  s->set_hmirror(s, 0);        // 0 = disable , 1 = enable
+  s->set_dcw(s, 1);            // 0 = disable , 1 = enable
+  s->set_colorbar(s, 0);       // 0 = disable , 1 = enable
   if (s->id.PID == OV3660_PID) {
     s->set_vflip(s, 1); // flip it back
     s->set_brightness(s, 1); // up the brightness just a bit
     s->set_saturation(s, -2); // lower the saturation
+  } else {
+    s->set_brightness(s, 0);     // -2 to 2
+    s->set_saturation(s, 0);     // -2 to 2
+    s->set_vflip(s, 0);          // 0 = disable , 1 = enable
   }
-  // drop down frame size for higher initial frame rate
-  s->set_framesize(s, FRAMESIZE_QVGA);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  Serial.println("init setup");
+  pinMode(trigPin, OUTPUT); // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT); // Sets the echoPin as an Input
+
+  Serial.print("Initializing the camera module...");
+  configInitCamera();
+  Serial.println("Ok!");
 
   WiFi.begin(ssid, password);
   Serial.println("Connecting");
@@ -148,6 +181,23 @@ String capturePhotoSaveSpiffs() {
   return encoded;
 }
 
+void checkDistance() {
+  // Clears the trigPin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin on HIGH state for 10 micro seconds
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH);
+
+  distanceCm = duration * SOUND_SPEED/2;
+
+  Serial.print("Distance (cm): ");
+  Serial.println(distanceCm);
+}
+
 void loop() {
   if ((millis() - lastTime) > timerDelay) {
     //Check WiFi connection status
@@ -155,10 +205,12 @@ void loop() {
       WiFiClient client;
       HTTPClient http;
 
-      while(digitalRead(pressButton)==HIGH){
+      checkDistance();
+
+      while(distanceCm > 30 && distanceCm < 100) {
         delay(100);
 
-        if(digitalRead(pressButton)==HIGH){
+        if(distanceCm > 30 && distanceCm < 100){
           String img_base64 = capturePhotoSaveSpiffs();
           spotNumber = 1;
 
@@ -173,6 +225,8 @@ void loop() {
           Serial.println("sending message to server");
 
           int httpResponseCode = http.POST(httpMessage);
+
+
 
           Serial.println(httpResponseCode);
         }
