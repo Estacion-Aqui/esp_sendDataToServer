@@ -7,7 +7,11 @@
 
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #define FILE_PHOTO "/photo.jpg"
-#define pressButton 2
+#define blueLed 12
+#define greenLed 13
+#define pressButton 14
+#define redLed 15
+#define builtinLed 4
 
 #include "camera_pins.h"
 
@@ -20,6 +24,8 @@ const char* camId = "sbc-golden-001";
 // const char* serverName = "http://192.168.0.10:5000/api/imgdata";
 const char* serverName = "http://192.168.15.160:5000/api/imgdata";
 
+boolean spotFree;
+
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
@@ -28,14 +34,7 @@ unsigned int spotNumber = 0;
 
 WiFiClient wifiClient; // do the WiFi instantiation thing
 
-void setup() {
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  Serial.println();
-
-  Serial.println("init setup");
-  pinMode(pressButton, INPUT);
-
+void configInitCamera(){
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -58,7 +57,7 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
+    // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
   //                      for larger pre-allocated frame buffer.
   if(psramFound()){
     config.frame_size = FRAMESIZE_UXGA;
@@ -78,14 +77,54 @@ void setup() {
   }
 
   sensor_t * s = esp_camera_sensor_get();
-  // initial sensors are flipped vertically and colors are a bit saturated
+  s->set_contrast(s, 0);       // -2 to 2
+  s->set_special_effect(s, 0); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
+  s->set_whitebal(s, 1);       // 0 = disable , 1 = enable
+  s->set_awb_gain(s, 1);       // 0 = disable , 1 = enable
+  s->set_wb_mode(s, 0);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
+  s->set_exposure_ctrl(s, 1);  // 0 = disable , 1 = enable
+  s->set_aec2(s, 0);           // 0 = disable , 1 = enable
+  s->set_ae_level(s, 0);       // -2 to 2
+  s->set_aec_value(s, 300);    // 0 to 1200
+  s->set_gain_ctrl(s, 1);      // 0 = disable , 1 = enable
+  s->set_agc_gain(s, 0);       // 0 to 30
+  s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
+  s->set_bpc(s, 0);            // 0 = disable , 1 = enable
+  s->set_wpc(s, 1);            // 0 = disable , 1 = enable
+  s->set_raw_gma(s, 1);        // 0 = disable , 1 = enable
+  s->set_lenc(s, 1);           // 0 = disable , 1 = enable
+  s->set_hmirror(s, 0);        // 0 = disable , 1 = enable
+  s->set_dcw(s, 1);            // 0 = disable , 1 = enable
+  s->set_colorbar(s, 0);       // 0 = disable , 1 = enable
   if (s->id.PID == OV3660_PID) {
     s->set_vflip(s, 1); // flip it back
     s->set_brightness(s, 1); // up the brightness just a bit
     s->set_saturation(s, -2); // lower the saturation
+  } else {
+    s->set_brightness(s, 0);     // -2 to 2
+    s->set_saturation(s, 0);     // -2 to 2
+    s->set_vflip(s, 0);          // 0 = disable , 1 = enable
   }
-  // drop down frame size for higher initial frame rate
+
   s->set_framesize(s, FRAMESIZE_QVGA);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  Serial.println("init setup");
+  pinMode(pressButton, INPUT);
+  pinMode(builtinLed, OUTPUT);
+  pinMode(redLed, OUTPUT);
+  pinMode(blueLed, OUTPUT);
+  pinMode(greenLed, OUTPUT);
+  spotFree = true;
+
+  Serial.print("Initializing the camera module...");
+  configInitCamera();
+  Serial.println("Ok!");
 
   WiFi.begin(ssid, password);
   Serial.println("Connecting");
@@ -127,11 +166,18 @@ String capturePhotoSaveSpiffs() {
     // Take a photo with the camera
     Serial.println("Taking a photo...");
 
+    digitalWrite(builtinLed, HIGH); //Turn on
+    delay (1000); //Wait 1 sec
     pic = esp_camera_fb_get();
+    delay (1000); //Wait 1 sec
+    digitalWrite(builtinLed, LOW);
+
     if (!pic) {
       Serial.println("Camera capture failed");
       continue;
     }
+
+    Serial.println("picture taken with success");
 
     size_t pic_len;
     pic_len = pic->len;
@@ -145,20 +191,49 @@ String capturePhotoSaveSpiffs() {
     }
   } while ( !ok );
 
+  Serial.println("picture encoded");
+
   return encoded;
 }
 
+void turnBlueLed() {
+  digitalWrite(redLed, LOW);
+  digitalWrite(greenLed, LOW);
+  digitalWrite(blueLed, HIGH);
+}
+
+void turnRedLed() {
+  digitalWrite(redLed, HIGH);
+  digitalWrite(greenLed, LOW);
+  digitalWrite(blueLed, LOW);
+}
+
+void turnGreenLed() {
+  digitalWrite(redLed, LOW);
+  digitalWrite(greenLed, HIGH);
+  digitalWrite(blueLed, LOW);
+}
+
 void loop() {
+  if (spotFree == true) {
+    turnRedLed();
+  } else {
+    turnGreenLed();
+  }
+
+  //validar se o sensor de presenca esta acionado e se a vaga esta livre
+
   if ((millis() - lastTime) > timerDelay) {
     //Check WiFi connection status
     if(WiFi.status() == WL_CONNECTED) {
       WiFiClient client;
       HTTPClient http;
 
-      while(digitalRead(pressButton)==HIGH){
+      while(digitalRead(pressButton)==HIGH) {
         delay(100);
 
-        if(digitalRead(pressButton)==HIGH){
+        if(digitalRead(pressButton)==HIGH) {
+          turnBlueLed();
           String img_base64 = capturePhotoSaveSpiffs();
           spotNumber = 1;
 
@@ -175,6 +250,8 @@ void loop() {
           int httpResponseCode = http.POST(httpMessage);
 
           Serial.println(httpResponseCode);
+          spotFree = !spotFree;
+          //colocar para continuar tirando foto até o status ser 200
         }
       }
     }
