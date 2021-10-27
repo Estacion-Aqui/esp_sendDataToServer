@@ -8,17 +8,15 @@
 
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #define FILE_PHOTO "/photo.jpg"
-#define blueLed 12
-#define greenLed 13
-#define redLed 15
-#define flashLed 4
-#define trigPin 14
-#define echoPin 2
+#define BLUE_LED 12
+#define GREEN_LED 13
+#define RED_LED 15
+#define FLASH_LED 4
+#define TRIG_PIN 14
+#define ECHO_PIN 2
 
 #include "camera_pins.h"
 
-// const char* ssid = "estacionaqui_pi";
-// const char* password = "modular123";
 const char* ssid = "Avelino-2.4G_EXT";
 const char* password = "avelino1461";
 const char* camId = "sbc-golden-001";
@@ -30,15 +28,15 @@ boolean spotFree;
 
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
-unsigned long lastTime = 0;
+unsigned long lastLoopTime = 0;
 unsigned long timerDelay = 2000;
-unsigned int spotNumber = 0;
-unsigned int distancia = 400;
+unsigned int spotNumber = 1;
+unsigned int sensorDistance = 400;
 
 WiFiClient wifiClient; // do the WiFi instantiation thing
-Ultrasonic ultrasonic(trigPin, echoPin);
+Ultrasonic ultrasonic(TRIG_PIN, ECHO_PIN);
 
-void configInitCamera(){
+void configInitCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -113,17 +111,21 @@ void configInitCamera(){
   s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
+void configInitPins() {
+  pinMode(FLASH_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(BLUE_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  spotFree = true;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
 
-  Serial.println("init setup");
-  pinMode(flashLed, OUTPUT);
-  pinMode(redLed, OUTPUT);
-  pinMode(blueLed, OUTPUT);
-  pinMode(greenLed, OUTPUT);
-  spotFree = true;
+  Serial.println("Init setup");
+  configInitPins();
 
   Serial.print("Initializing the camera module...");
   configInitCamera();
@@ -160,77 +162,70 @@ bool checkPhoto( fs::FS &fs ) {
   return ( pic_sz > 100 );
 }
 
-String capturePhotoSaveSpiffs() {
-  camera_fb_t * pic = NULL; // pointer
-  bool ok = 0; // Boolean indicating if the picture has been taken correctly
+String capturePhoto() {
+  camera_fb_t * picture = NULL; // pointer to the photo
+  bool picOk = 0;
   String encoded = "";
 
   do {
-    // Take a photo with the camera
     Serial.println("Taking a photo...");
 
-    digitalWrite(flashLed, HIGH); // Turn on
-    delay (1000); //Wait 1 sec
-    pic = esp_camera_fb_get();
-    delay (1000); //Wait 1 sec
-    digitalWrite(flashLed, LOW); // Turn off
+    digitalWrite(FLASH_LED, HIGH); // Turn on flash
+    delay (1000);
+    picture = esp_camera_fb_get(); // take the the picture and save in the buffer
+    delay (1000);
+    digitalWrite(FLASH_LED, LOW); // Turn off flash
 
-    if (!pic) {
+    if (!picture) {
       Serial.println("Camera capture failed");
       continue;
     }
 
-    Serial.println("picture taken with success");
+    size_t pic_length = picture->len;
+    encoded = base64::encode(picture->buf, pic_length); // encode pic ion base64 format
 
-    size_t pic_len;
-    pic_len = pic->len;
-
-    encoded = base64::encode(pic->buf, pic_len);
-
-    esp_camera_fb_return(pic);
+    esp_camera_fb_return(picture); // clean the buffer for the camera reuse
 
     if (encoded.length() > 0) {
-      ok = 1;
+      picOk = 1;
     }
-  } while ( !ok );
-
-  Serial.println("picture encoded");
+  } while ( !picOk );
 
   return encoded;
 }
 
 void turnBlueLed() {
-  digitalWrite(redLed, LOW);
-  digitalWrite(greenLed, LOW);
-  digitalWrite(blueLed, HIGH);
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(BLUE_LED, HIGH);
 }
 
 void turnRedLed() {
-  digitalWrite(redLed, HIGH);
-  digitalWrite(greenLed, LOW);
-  digitalWrite(blueLed, LOW);
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(BLUE_LED, LOW);
 }
 
 void turnGreenLed() {
-  digitalWrite(redLed, LOW);
-  digitalWrite(greenLed, HIGH);
-  digitalWrite(blueLed, LOW);
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(BLUE_LED, LOW);
 }
 
 boolean readSensor() {
-  distancia = ultrasonic.read();
+  sensorDistance = ultrasonic.read();
 
-  Serial.println("Distancia em cm: " + String(distancia));
+  Serial.println("Distance in cm: " + String(sensorDistance));
 
-  if (distancia < 200) {
+  if (sensorDistance < 200) {
     delay(2000);
 
-    distancia = ultrasonic.read();
+    sensorDistance = ultrasonic.read();
     delay(50);
 
-    if (distancia < 200) {
-      digitalWrite(blueLed, HIGH);
-      digitalWrite(redLed, HIGH);
+    if (sensorDistance < 200) {
+      digitalWrite(BLUE_LED, HIGH);
+      digitalWrite(RED_LED, HIGH);
       return true;
     }
   }
@@ -245,16 +240,15 @@ void sendPicture() {
   HTTPClient http;
 
   do {
-    String img_base64 = capturePhotoSaveSpiffs();
+    String img_base64 = capturePhoto();
     spotNumber = 1;
 
-    // Your Domain name with URL path or IP address with path
     http.begin(client, serverName);
 
     http.addHeader("Content-Type", "application/json");
     String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
-    String("\"cam_id\":\"") + String(camId) + String("\",") +
-    String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
+      String("\"cam_id\":\"") + String(camId) + String("\",") +
+      String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
 
     Serial.println("sending message to server");
 
@@ -276,7 +270,7 @@ void loop() {
     turnGreenLed();
   }
 
-  if ((millis() - lastTime) > timerDelay) {
+  if ((millis() - lastLoopTime) > timerDelay) {
     //Check WiFi connection status
     if(WiFi.status() == WL_CONNECTED) {
       boolean possuiCarro = readSensor();
@@ -287,10 +281,10 @@ void loop() {
         sendPicture();
       } else if (!possuiCarro) {
         spotFree = true;
-        Serial.println("vaga esta livre");
+        Serial.println("spot is free");
       }
     }
 
-    lastTime = millis();
+    lastLoopTime = millis();
   }
 }
