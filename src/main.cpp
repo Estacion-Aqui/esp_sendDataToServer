@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "esp_camera.h"
+#include <ultrasonic.h>
 #include <SPIFFS.h>
 #include <base64.h>
 
@@ -9,15 +10,16 @@
 #define FILE_PHOTO "/photo.jpg"
 #define blueLed 12
 #define greenLed 13
-#define pressButton 14
 #define redLed 15
-#define builtinLed 4
+#define flashLed 4
+#define trigPin 14
+#define echoPin 2
 
 #include "camera_pins.h"
 
 // const char* ssid = "estacionaqui_pi";
 // const char* password = "modular123";
-const char* ssid = "Avelino-2.4G";
+const char* ssid = "Avelino-2.4G_EXT";
 const char* password = "avelino1461";
 const char* camId = "sbc-golden-001";
 
@@ -29,10 +31,12 @@ boolean spotFree;
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
-unsigned long timerDelay = 5000;
+unsigned long timerDelay = 2000;
 unsigned int spotNumber = 0;
+unsigned int distancia = 400;
 
 WiFiClient wifiClient; // do the WiFi instantiation thing
+Ultrasonic ultrasonic(trigPin, echoPin);
 
 void configInitCamera(){
   camera_config_t config;
@@ -115,8 +119,7 @@ void setup() {
   Serial.println();
 
   Serial.println("init setup");
-  pinMode(pressButton, INPUT);
-  pinMode(builtinLed, OUTPUT);
+  pinMode(flashLed, OUTPUT);
   pinMode(redLed, OUTPUT);
   pinMode(blueLed, OUTPUT);
   pinMode(greenLed, OUTPUT);
@@ -166,11 +169,11 @@ String capturePhotoSaveSpiffs() {
     // Take a photo with the camera
     Serial.println("Taking a photo...");
 
-    digitalWrite(builtinLed, HIGH); //Turn on
+    digitalWrite(flashLed, HIGH); // Turn on
     delay (1000); //Wait 1 sec
     pic = esp_camera_fb_get();
     delay (1000); //Wait 1 sec
-    digitalWrite(builtinLed, LOW);
+    digitalWrite(flashLed, LOW); // Turn off
 
     if (!pic) {
       Serial.println("Camera capture failed");
@@ -214,6 +217,58 @@ void turnGreenLed() {
   digitalWrite(blueLed, LOW);
 }
 
+boolean readSensor() {
+  distancia = ultrasonic.read();
+
+  Serial.println("Distancia em cm: " + String(distancia));
+
+  if (distancia < 200) {
+    delay(2000);
+
+    distancia = ultrasonic.read();
+    delay(50);
+
+    if (distancia < 200) {
+      digitalWrite(blueLed, HIGH);
+      digitalWrite(redLed, HIGH);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void sendPicture() {
+  unsigned long startTime = millis();
+  unsigned int responseCode;
+  WiFiClient client;
+  HTTPClient http;
+
+  do {
+    String img_base64 = capturePhotoSaveSpiffs();
+    spotNumber = 1;
+
+    // Your Domain name with URL path or IP address with path
+    http.begin(client, serverName);
+
+    http.addHeader("Content-Type", "application/json");
+    String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
+    String("\"cam_id\":\"") + String(camId) + String("\",") +
+    String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
+
+    Serial.println("sending message to server");
+
+    responseCode = http.POST(httpMessage);
+
+    Serial.println(responseCode);
+
+    if((millis() - startTime) > 60000)
+      return;
+  } while(responseCode != 200);
+
+  spotFree = false;
+}
+
 void loop() {
   if (spotFree == true) {
     turnRedLed();
@@ -221,39 +276,21 @@ void loop() {
     turnGreenLed();
   }
 
-  //validar se o sensor de presenca esta acionado e se a vaga esta livre
-
   if ((millis() - lastTime) > timerDelay) {
     //Check WiFi connection status
     if(WiFi.status() == WL_CONNECTED) {
-      WiFiClient client;
-      HTTPClient http;
+      boolean possuiCarro = readSensor();
 
-      while(digitalRead(pressButton)==HIGH) {
-        delay(100);
+      if(possuiCarro && spotFree) {
+        turnBlueLed();
 
-        if(digitalRead(pressButton)==HIGH) {
-          turnBlueLed();
-          String img_base64 = capturePhotoSaveSpiffs();
-          spotNumber = 1;
-
-          // Your Domain name with URL path or IP address with path
-          http.begin(client, serverName);
-
-          http.addHeader("Content-Type", "application/json");
-          String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
-          String("\"cam_id\":\"") + String(camId) + String("\",") +
-          String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
-
-          Serial.println("sending message to server");
-
-          int httpResponseCode = http.POST(httpMessage);
-
-          Serial.println(httpResponseCode);
-          spotFree = !spotFree;
-          //colocar para continuar tirando foto até o status ser 200
-        }
+        sendPicture();
+      } else if (!possuiCarro) {
+        spotFree = true;
+        Serial.println("vaga esta livre");
       }
     }
+
+    lastTime = millis();
   }
 }
