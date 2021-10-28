@@ -17,7 +17,7 @@
 
 #include "camera_pins.h"
 
-const char* ssid = "Avelino-2.4G_EXT";
+const char* ssid = "Avelino-2.4G";
 const char* password = "avelino1461";
 const char* camId = "sbc-golden-001";
 
@@ -218,7 +218,7 @@ boolean readSensor() {
   Serial.println("Distance in cm: " + String(sensorDistance));
 
   if (sensorDistance < 200) {
-    delay(2000);
+    delay(3000);
 
     sensorDistance = ultrasonic.read();
     delay(50);
@@ -233,34 +233,42 @@ boolean readSensor() {
   return false;
 }
 
-void sendPicture() {
-  unsigned long startTime = millis();
-  unsigned int responseCode;
-  WiFiClient client;
+int sendToHelix(String httpMessage) {
+  unsigned long startRequestTime = millis();
   HTTPClient http;
+  int responseCode;
 
   do {
-    String img_base64 = capturePhoto();
-    spotNumber = 1;
-
-    http.begin(client, serverName);
+    http.begin(wifiClient, serverName);
 
     http.addHeader("Content-Type", "application/json");
-    String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
-      String("\"cam_id\":\"") + String(camId) + String("\",") +
-      String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
-
-    Serial.println("sending message to server");
 
     responseCode = http.POST(httpMessage);
 
     Serial.println(responseCode);
 
-    if((millis() - startTime) > 60000)
-      return;
+    if((millis() - startRequestTime) > 180000)
+      return 0;
   } while(responseCode != 200);
 
-  spotFree = false;
+  return responseCode;
+}
+
+void sendPicture() {
+  String img_base64 = capturePhoto();
+  spotNumber = 1;
+
+  String httpMessage = String("{\"img_data\":\"") + img_base64 + String("\",") +
+      String("\"cam_id\":\"") + String(camId) + String("\",") +
+      String("\"spot_status\":\"filled\",") +
+      String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
+
+  Serial.println("sending picture to server");
+  int responseCode = sendToHelix(httpMessage);
+
+  if (responseCode == 200) {
+    spotFree = false;
+  }
 }
 
 void loop() {
@@ -279,8 +287,15 @@ void loop() {
         turnBlueLed();
 
         sendPicture();
-      } else if (!possuiCarro) {
+      } else if (!possuiCarro && !spotFree) {
         spotFree = true;
+
+        String httpMessage = String("{\"img_data\":\"\",") +
+          String("\"cam_id\":\"") + String(camId) + String("\",") +
+          String("\"spot_status\":\"free\",") +
+          String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
+
+        sendToHelix(httpMessage);
         Serial.println("spot is free");
       }
     }
