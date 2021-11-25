@@ -135,6 +135,8 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
 
+  digitalWrite(GREEN_LED, HIGH);
+
   Serial.println("Init setup");
   configInitPins();
 
