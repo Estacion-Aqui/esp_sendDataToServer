@@ -5,6 +5,7 @@
 #include <ultrasonic.h>
 #include <SPIFFS.h>
 #include <base64.h>
+#include <PubSubClient.h>
 
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #define FILE_PHOTO "/photo.jpg"
@@ -17,12 +18,17 @@
 
 #include "camera_pins.h"
 
+// const char* ssid = "EstacionAquiWifi";
+// const char* password = "modular123";
 const char* ssid = "Avelino-2.4G";
 const char* password = "avelino1461";
-const char* camId = "sbc-golden-001";
+const char* camId = "sbc-golden-011";
+const char* deviceId = "cam011";
+const char* entityId = "urn:ngsi-ld:ParkingSpot:sbc:golden:011";
 
-// const char* serverName = "http://192.168.0.10:5000/api/imgdata";
-const char* serverName = "http://192.168.15.160:5000/api/imgdata";
+const char* serverAddress = "http://192.168.80.196:5000/api/imgdata";
+const char* helixAddress = "34.151.219.62";
+const int mqttPort = 1883;
 
 boolean spotFree;
 
@@ -33,8 +39,13 @@ unsigned long timerDelay = 2000;
 unsigned int spotNumber = 1;
 unsigned int sensorDistance = 400;
 
-WiFiClient wifiClient; // do the WiFi instantiation thing
+WiFiClient wifiClient; // do the WiFi instantiation client
+PubSubClient mqttClient(wifiClient); // do the MQTT instantiation client
 Ultrasonic ultrasonic(TRIG_PIN, ECHO_PIN);
+
+void mqttConnect();
+void mqttCallback(char* topic, byte* payload, unsigned int length);
+void helixCreateEntity();
 
 void configInitCamera() {
   camera_config_t config;
@@ -145,6 +156,9 @@ void setup() {
   Serial.print("IP Address: http://");
   Serial.println(WiFi.localIP());
 
+  helixCreateEntity();
+  mqttConnect();
+
   if (!SPIFFS.begin(true)) {
     Serial.println("An Error has occurred while mounting SPIFFS");
     ESP.restart();
@@ -154,6 +168,95 @@ void setup() {
     Serial.println("SPIFFS mounted successfully");
   }
 
+}
+
+void helixCreateEntity() {
+  HTTPClient http;
+
+  Serial.println("Creating " + String(deviceId) + " entity...");
+
+  String bodyRequest = "{\"devices\": [{" +
+  String("\"device_id\": \"" + String(deviceId) + "\",") +
+  String("\"entity_name\": \"" + String(entityId) + "\",") +
+  String("\"entity_type\": \"ParkingSpot\",") +
+  String("\"protocol\": \"PDI-IoTA-UltraLight\",") +
+  String("\"transport\": \"MQTT\",") +
+  String("\"commands\": [") +
+  String("{\"name\": \"free\", \"type\": \"command\"}, {\"name\": \"reserved\", \"type\": \"command\"}, {\"name\": \"filled\", \"type\": \"command\"}") +
+  String("],") +
+  String("\"attributes\": [") +
+  String("{\"object_id\": \"c\", \"name\": \"category\", \"type\": \"string\"},") +
+  String("{\"object_id\": \"cp\", \"name\": \"current_plate\", \"type\": \"string\"},") +
+  String("{\"object_id\": \"l\", \"name\": \"location\", \"type\": \"Point\"},") +
+  String("{\"object_id\": \"n\", \"name\": \"name\", \"type\": \"string\"},") +
+  String("{\"object_id\": \"s\", \"name\": \"status\", \"type\": \"string\"}") +
+  String("]}]}");
+
+  String helixUrl = "http://" + String(helixAddress) + ":4041/iot/devices";
+
+  http.begin(wifiClient, helixUrl);
+
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("fiware-service", "helixiot");
+  http.addHeader("fiware-servicepath", "/");
+
+  int response = http.POST(bodyRequest);
+
+  if (response < 0) {
+    Serial.println("request error - " + response);
+  }
+
+  if (response != HTTP_CODE_OK) {
+    Serial.println("Dispositivo criado com sucesso");
+  } else {
+    Serial.println("Falha na criacao do dispositivo");
+  }
+
+  http.end();
+}
+
+void mqttConnect() {
+  String topic = String("/iot/" + String(deviceId) + "/cmd");
+
+  Serial.println("Connecting to Helix....");
+
+  mqttClient.setServer(helixAddress, mqttPort);
+  mqttClient.setCallback(mqttCallback);
+
+  while(!mqttClient.connected()) {
+    if (mqttClient.connect("helix")) {
+      Serial.println("Connected to Helix");
+    } else {
+      Serial.print("failed to connect: ");
+      Serial.println(mqttClient.state());
+    }
+  }
+
+  mqttClient.subscribe(topic.c_str());
+}
+
+void turnBlueLed() {
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(BLUE_LED, HIGH);
+}
+
+void turnOrangeLed() {
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(BLUE_LED, HIGH);
+}
+
+void turnRedLed() {
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(BLUE_LED, LOW);
+}
+
+void turnGreenLed() {
+  digitalWrite(RED_LED, LOW);
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(BLUE_LED, LOW);
 }
 
 bool checkPhoto( fs::FS &fs ) {
@@ -194,22 +297,26 @@ String capturePhoto() {
   return encoded;
 }
 
-void turnBlueLed() {
-  digitalWrite(RED_LED, LOW);
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(BLUE_LED, HIGH);
-}
+void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
+  payload[length] = '\0';
+  String strMsg = String((char*) payload);
 
-void turnRedLed() {
-  digitalWrite(RED_LED, HIGH);
-  digitalWrite(GREEN_LED, LOW);
-  digitalWrite(BLUE_LED, LOW);
-}
+  int charPos = strMsg.lastIndexOf("@");
+  String command = strMsg.substring(charPos + 1);
+  command.replace("|", "");
 
-void turnGreenLed() {
-  digitalWrite(RED_LED, LOW);
-  digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(BLUE_LED, LOW);
+  Serial.println("Received payload:");
+  Serial.println(strMsg);
+  Serial.println(command);
+  Serial.println("..................");
+
+  if (command == "reserved") {
+    turnOrangeLed();
+  } else if (command == "filled") {
+    turnRedLed();
+  } else if (command == "free") {
+    turnGreenLed();
+  }
 }
 
 boolean readSensor() {
@@ -217,15 +324,13 @@ boolean readSensor() {
 
   Serial.println("Distance in cm: " + String(sensorDistance));
 
-  if (sensorDistance < 200) {
-    delay(3000);
+  if (sensorDistance < 170) {
+    delay(5000);
 
-    sensorDistance = ultrasonic.read();
+    unsigned int newSensorDistance = ultrasonic.read();
     delay(50);
 
-    if (sensorDistance < 200) {
-      digitalWrite(BLUE_LED, HIGH);
-      digitalWrite(RED_LED, HIGH);
+    if (newSensorDistance >= sensorDistance - 2 && newSensorDistance <= sensorDistance + 2 ) {
       return true;
     }
   }
@@ -233,13 +338,13 @@ boolean readSensor() {
   return false;
 }
 
-int sendToHelix(String httpMessage) {
-  unsigned long startRequestTime = millis();
+int sendToRaspberry(String httpMessage) {
   HTTPClient http;
   int responseCode;
+  int retries = 0;
 
   do {
-    http.begin(wifiClient, serverName);
+    http.begin(wifiClient, serverAddress);
 
     http.addHeader("Content-Type", "application/json");
 
@@ -247,7 +352,9 @@ int sendToHelix(String httpMessage) {
 
     Serial.println(responseCode);
 
-    if((millis() - startRequestTime) > 180000)
+    retries++;
+
+    if(retries > 3)
       return 0;
   } while(responseCode != 200);
 
@@ -264,7 +371,7 @@ void sendPicture() {
       String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
 
   Serial.println("sending picture to server");
-  int responseCode = sendToHelix(httpMessage);
+  int responseCode = sendToRaspberry(httpMessage);
 
   if (responseCode == 200) {
     spotFree = false;
@@ -272,11 +379,11 @@ void sendPicture() {
 }
 
 void loop() {
-  if (spotFree == true) {
-    turnRedLed();
-  } else {
-    turnGreenLed();
+  if(!mqttClient.connected()) {
+    mqttConnect();
   }
+
+  mqttClient.loop();
 
   if ((millis() - lastLoopTime) > timerDelay) {
     //Check WiFi connection status
@@ -295,7 +402,7 @@ void loop() {
           String("\"spot_status\":\"free\",") +
           String("\"spot_number\":\"") + String(spotNumber) + String("\"}");
 
-        sendToHelix(httpMessage);
+        sendToRaspberry(httpMessage);
         Serial.println("spot is free");
       }
     }
