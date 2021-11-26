@@ -18,10 +18,8 @@
 
 #include "camera_pins.h"
 
-// const char* ssid = "EstacionAquiWifi";
-// const char* password = "modular123";
-const char* ssid = "Avelino-2.4G";
-const char* password = "avelino1461";
+const char* ssid = "EstacionAquiWifi";
+const char* password = "modular123";
 const char* camId = "sbc-golden-011";
 const char* deviceId = "cam011";
 const char* entityId = "urn:ngsi-ld:ParkingSpot:sbc:golden:011";
@@ -70,8 +68,7 @@ void configInitCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-    // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
-  //                      for larger pre-allocated frame buffer.
+  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality for larger pre-allocated frame buffer.
   if(psramFound()){
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 10;
@@ -118,8 +115,6 @@ void configInitCamera() {
     s->set_saturation(s, 0);     // -2 to 2
     s->set_vflip(s, 0);          // 0 = disable , 1 = enable
   }
-
-  s->set_framesize(s, FRAMESIZE_QVGA);
 }
 
 void configInitPins() {
