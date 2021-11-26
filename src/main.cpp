@@ -24,7 +24,7 @@ const char* camId = "sbc-golden-011";
 const char* deviceId = "cam011";
 const char* entityId = "urn:ngsi-ld:ParkingSpot:sbc:golden:011";
 
-const char* serverAddress = "http://192.168.80.196:5000/api/imgdata";
+const char* serverAddress = "http://192.168.189.196:5000/api/imgdata";
 const char* helixAddress = "34.151.219.62";
 const int mqttPort = 1883;
 
@@ -68,13 +68,13 @@ void configInitCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // if PSRAM IC present, init with UXGA resolution and higher JPEG quality for larger pre-allocated frame buffer.
+    // if PSRAM IC present, init with UXGA resolution and higher JPEG quality for larger pre-allocated frame buffer.
   if(psramFound()){
-    config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 10;
+    config.frame_size = FRAMESIZE_QVGA;
+    config.jpeg_quality = 8;
     config.fb_count = 2;
   } else {
-    config.frame_size = FRAMESIZE_SVGA;
+    config.frame_size = FRAMESIZE_QVGA;
     config.jpeg_quality = 12;
     config.fb_count = 1;
   }
@@ -310,8 +310,10 @@ void mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
   if (command == "reserved") {
     turnOrangeLed();
   } else if (command == "filled") {
+    spotFree = false;
     turnRedLed();
   } else if (command == "free") {
+    spotFree = true;
     turnGreenLed();
   }
 }
@@ -376,6 +378,12 @@ void sendPicture() {
 }
 
 void loop() {
+  if (spotFree == true) {
+    turnGreenLed();
+  } else {
+    turnRedLed();
+  }
+
   if(!mqttClient.connected()) {
     mqttConnect();
   }
